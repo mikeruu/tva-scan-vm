@@ -1,0 +1,14 @@
+parameters:
+  #SSH KEY FOR VM LOGIN
+  key_name: 
+  #SCAN VM - CentOS 7
+  image_id: 
+  instance_type:
+  scan_network: 
+  scan_ip: 
+  scan_subnet: 
+  k8s_vm_secgroup: 
+  k8s_network: 
+  #IPs of the scan console
+  console_pub: 
+  console_priv:

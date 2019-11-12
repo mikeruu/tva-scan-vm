@@ -1,0 +1,121 @@
+heat_template_version: queens
+
+description: Simple template to deploy a single compute instance
+
+parameters:
+  key_name:
+    type: string
+    label: Key Name
+    description: Name of key-pair to be used for compute instance
+  image_id:
+    type: string
+    label: Image ID
+    description: Image to be used for compute instance
+  instance_type:
+    type: string
+    label: Instance Type
+    description: Type of instance (flavor) to be used
+    default: m1.small
+  scan_network:
+    type: string
+    label: RPC-TVA-SCAN-NET net ID
+    description: The network created with the access for PCI
+  scan_ip:
+    type: string
+    label: RPC-TVA-SCAN-NET IP
+    description: IP assigned from the RPC-TVA-SCAN-NET network
+  scan_subnet:
+    type: string
+    label: Scan Subnet
+    description: Subnet for the RPC-TVA-SCAN-NET network
+  k8s_vm_secgroup:
+    type: string
+    label: K8s VM SecGroup
+    description: Secgroup used by the K8s VMs to allow all ports between its members
+  k8s_network:
+    type: string
+    label: K8s VMs Network ID
+    description: Network used by all K8s VM
+  console_priv:
+    type: string
+    label: Console priv IP
+    description: Scan console private IP
+  console_pub:
+    type: string
+    label: Console pub IP
+    description: Scan console public IP
+resources:
+  rpc-tva-scan-sg:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: rpc-tva-scan
+      description: SG for TVA VM to allow ssh access from bastions and comms to scan console
+      rules:
+        - { "direction": ingress, "protocol": icmp,  "remote_ip_prefix": 0.0.0.0/0}
+        - { "direction": ingress,"ethertype": IPv4, "protocol": tcp, "port_range_min": 22,"port_range_max": 22, "remote_ip_prefix": 10.10.145.101/32}
+        - { "direction": ingress,"ethertype": IPv4, "protocol": tcp, "port_range_min": 22,"port_range_max": 22, "remote_ip_prefix": 10.9.75.101/32}
+        - { "direction": ingress,"ethertype": IPv4, "protocol": tcp, "port_range_min": 22,"port_range_max": 22, "remote_ip_prefix": 10.5.91.101/32}
+        - { "direction": ingress,"ethertype": IPv4, "protocol": tcp, "port_range_min": 22,"port_range_max": 22, "remote_ip_prefix": 10.17.30.101/32}
+        - { "direction": ingress,"ethertype": IPv4, "protocol": tcp, "port_range_min": 22,"port_range_max": 22, "remote_ip_prefix": 10.11.101.101/32}
+        - { "direction": ingress,"ethertype": IPv4, "protocol": tcp, "port_range_min": 22,"port_range_max": 22, "remote_ip_prefix": 10.18.97.101/32}
+        - { "direction": ingress,"ethertype": IPv4, "protocol": tcp, "port_range_min": 22,"port_range_max": 22, "remote_ip_prefix": 10.16.35.101/32}
+        - { "direction": ingress,"ethertype": IPv4, "protocol": tcp, "port_range_min": 40814,"port_range_max": 40814, "remote_ip_prefix": { get_param: console_priv }}
+        - { "direction": ingress,"ethertype": IPv4, "protocol": tcp, "port_range_min": 40814,"port_range_max": 40814, "remote_ip_prefix": { get_param: console_pub }}
+    deletion_policy: retain
+
+
+  tva_port1:
+    type: OS::Neutron::Port
+    properties:
+      name: TVA scan port
+      network: { get_param: scan_network  }
+      fixed_ips: 
+        - ip_address: { get_param: scan_ip }
+      security_groups: 
+        - { get_resource: rpc-tva-scan-sg }
+    deletion_policy: retain
+
+
+  k8s_port:
+    type: OS::Neutron::Port
+    properties:
+      name: TVA k8s scan port
+      network: { get_param: k8s_network }
+      security_groups:
+        - { get_param: k8s_vm_secgroup }
+    deletion_policy: retain
+
+        
+  tva_scan_instance:
+    type: OS::Nova::Server
+    properties:
+      key_name: { get_param: key_name }
+      image: { get_param: image_id }
+      flavor: { get_param: instance_type }
+      networks:
+        - port: { get_resource: tva_port1 }
+        - port: { get_resource: k8s_port }
+      user_data: |
+          #!/bin/bash
+          sed -i 's/SELINUX=enforcing/SELINUX=disabled/' /etc/selinux/config
+          
+          echo 'GATEWAYDEV=eth0' >> /etc/sysconfig/network
+          
+          cat <<EOF >> /etc/sysconfig/network-scripts/ifcfg-eth1
+          DEVICE=eth1
+          NAME=eth1
+          BOOTPROTO=dhcp
+          NM_CONTROLLED=no
+          PERSISTENT_DHCLIENT=1
+          ONBOOT=yes
+          TYPE=Ethernet
+          PEERDNS=no         
+          EOF
+          
+          /usr/sbin/ifup eth1   
+        
+          /usr/sbin/reboot
+        
+      user_data_format: RAW
+    deletion_policy: retain
+      
